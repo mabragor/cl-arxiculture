@@ -6,7 +6,7 @@
   :license "MIT"
   :version "0.1"
   :serial t
-  :depends-on (#:cl-interpol #:cl-ppcre #:iterate #:clesh #:cl-fad)
+  :depends-on (#:cl-interpol #:cl-ppcre #:iterate #:clesh #:cl-fad #:lol-re)
   :components ((:file "package")
                (:file "cl-arxiculture")))
 

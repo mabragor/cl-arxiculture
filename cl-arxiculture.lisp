@@ -3,10 +3,17 @@
 (in-package #:cl-arxiculture)
 
 (cl-interpol:enable-interpol-syntax)
+(enable-read-macro-tokens)
 
 ;; Ok, let's setup two modest goals
 ;; * parse the bibliography to know which papers are there
 ;; * parse the text to see, how many times are the papers cited
+
+(defun err-script (str)
+  (multiple-value-bind (out err errno) (clesh:script str)
+    (if (equal 0 errno)
+	out
+	(error err))))
 
 (defun slurp-stream (stream)
   (let ((seq (make-array (file-length stream) :element-type 'character :fill-pointer t)))
@@ -158,3 +165,92 @@
 ;; 2001: 751 284 211 142 139 204 179 222 234 261
 ;; 2002: 729 249 211 149 134 197 228 267 303 294
 ;; 2003: 213 89 76 46 45 62 52 78 82 112
+
+
+;; OK, clearly most of the papers are not being cited correctly
+;; So, there must be the way to increase the citation coverage somehow
+
+
+(defun make-bibitems-only (&optional (year 1992))
+  (err-script #?"mkdir -p ~/$(year)-bibitems")
+  (iter outer (for fname in (list-directory #?"~/$(year)"))
+	(let ((text (slightly-comb-file (slurp-file-till-unreadable fname))))
+	  (let ((bibitems (all-matches *bibitem-re* text)))
+	    (if (not bibitems)
+		(next-iteration))
+	    (err-script #?"ln -s $(fname) ~/$(year)-bibitems/")))))
+
+
+;; What I need is some sort of "analog" parser -- that is, the thing that
+;; not only says "this is precisely this" or "this is not it", but
+;; rather this looks like this up to a certain extent.
+
+;; For now the effectiveness (in terms of fastness and memory usage)
+;; of this parser is not important at all, unless it becomes absolutely
+;; slow and memory-consumptive -- the main thing to do is to develop the
+;; concept of what it should in principle do and how.
+
+
+(defun foo ()
+  (slurp-file "~/1992-bibitems/9206112"))
+
+(defun extract-bibliography (text)
+  (let ((begins (all-matches *begin-bibliography-re* text))
+	(ends (all-matches *end-bibliography-re* text)))
+    (if (or (not begins)
+	    (not ends))
+	(error "I can't match begin or end bibliography regexps, sorry"))
+    (if (< 2 (length begins))
+	(warn "More than one begin of bibliography found, please, look manually"))
+    (if (< 2 (length ends))
+	(warn "More than one end of bibliography found, please, look manually"))
+    (subseq text (cadr begins) (car ends))))
+
+(defun to-bibitems (text)
+  (mapcar #'analog-parse-bibitem (cdr (split #?/\\bibitem/ text))))
+
+(defun analog-parse-bibitem (text)
+  (let ((label (progn (m~ #?/^{([^}]+)}/ text) (list $1 $-0 $+0))))
+    (list label text)))
+
+(defparameter *journal-names*
+  '((:physics-review-letters-d "Phys. Rev. Lett. D")
+    (:nuclear-physics-b "Nucl. Phys. B")
+    (:physics-letters-b "Phys. Lett. B")
+    (:cern-preprint "CERN Preprint")
+    (:rims-preprint "Research Institute in Mathematical Sciences, Kyoto, Preprint")
+    (:durham-preprint "Durham University Preprint")
+    (:private-communication "private communication")))
+
+(defparameter *authors*
+  '(
+    (("Braden" "H" "W") ("H.~W. Braden"))
+    (("Christe" "P") ("P.~Christe"))
+    (("Coleman" "S") ("S.~Coleman"))
+    (("Corrigan" "E" "F") ("E.~F. Corrigan"))
+    (("Delius" "G" "W") ("G.~W. Delius" "G.~W.~Delius"))
+    (("Destri" "C") ("C.~Destri"))
+    (("Dorey" "P" "E") ("P.~E. Dorey"))
+    (("Feigin" "B" "L") ("B.~L. Feigin"))
+    (("Frenkel" "E" "V") ("E.~V. Frenkel"))
+    (("Grisaru" "M" "T") ("M.~T. Grisaru"))
+    (("Kac" "Victor" "G") ("V.~Kac" "V.~G.~Kac" "V.G. Kac" "V. Kac" "V.Kac" "Kac, V. G." "Kac,V.G." "Kac, V.G."
+			   "V.G.~Kac"
+			   "V. Ka\v c"
+			   )
+    (("Kausch" "H" "G") ("H.~G. Kausch"))
+    (("Mussardo" "G") ("G.~Mussardo"))
+    (("Sasaki" "R") ("R.~Sasaki"))
+    (("de Vega" "H" "J") ("H.~J. de~Vega"))
+    (("Watts" "G" "M" "T") ("G.~M.~T. Watts"))
+    (("Weston" "R" "A") ("R.~A. Weston"))
+    (("Zanon" "D") ("D.~Zanon"))
+    ))
+
+;; Then I can grep all these surnames through the whole arXiv to see, how they are spelled
+;; in different papers
+    
+;; 
+  
+(defun bar ()
+  (to-bibitems (extract-bibliography (foo))))
