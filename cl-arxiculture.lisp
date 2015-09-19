@@ -4,10 +4,21 @@
 
 (cl-interpol:enable-interpol-syntax)
 (enable-read-macro-tokens)
+(quasiquote-2.0:enable-quasiquote-2.0)
 
 ;; Ok, let's setup two modest goals
 ;; * parse the bibliography to know which papers are there
 ;; * parse the text to see, how many times are the papers cited
+
+(defmacro inject-kwd-if-nonnil (name)
+  ``,@(if ,name
+	  (list (list ,(intern (string name) "KEYWORD")
+		      ,name))))
+
+(defmacro inject-kwds-if-nonnil (&rest names)
+  ``,@`(,,@(mapcar (lambda (x)
+		     ``,!m(inject-kwd-if-nonnil ,x))
+		   names)))
 
 (defun err-script (str)
   (multiple-value-bind (out err errno) (clesh:script str)
@@ -192,7 +203,7 @@
 
 
 (defun foo ()
-  (slurp-file "~/1992-bibitems/9206112"))
+  (slurp-file "~/1993-bibitems/9312210"))
 
 (defun extract-bibliography (text)
   (let ((begins (all-matches *begin-bibliography-re* text))
@@ -237,7 +248,7 @@
     (("Kac" "Victor" "G") ("V.~Kac" "V.~G.~Kac" "V.G. Kac" "V. Kac" "V.Kac" "Kac, V. G." "Kac,V.G." "Kac, V.G."
 			   "V.G.~Kac"
 			   "V. Ka\v c"
-			   )
+			   ))
     (("Kausch" "H" "G") ("H.~G. Kausch"))
     (("Mussardo" "G") ("G.~Mussardo"))
     (("Sasaki" "R") ("R.~Sasaki"))
@@ -252,5 +263,161 @@
     
 ;; 
   
-(defun bar ()
-  (to-bibitems (extract-bibliography (foo))))
+(defun bar (&optional fname)
+  (to-bibitems (extract-bibliography (or (slurp-file fname)
+					 (foo)))))
+
+
+;; OK, let's pick a random paper with sufficient number of
+;; bibitems and write a parser for them...
+;; Hmm... the way authors write references seems to be 
+;; very much correlated between their papers
+
+(define-ac-rule posinteger ()
+  (parse-integer (text (postimes (character-ranges (#\0 #\9))))))
+
+(define-ac-rule page-number ()
+  posinteger)
+
+(define-ac-rule year ()
+  (let ((it posinteger))
+    (if (or (> 1900 it)
+	    (< 9999 it))
+	(fail-parse "Integer not in 1900 -- 9999 range to be counted as a valid year"))
+    it))
+
+(define-ac-rule bracket-year ()
+  (progm #\( year #\)))
+
+(define-ac-rule surname ()
+  (text (character-ranges (#\A #\Z)) (postimes (character-ranges (#\a #\z)))))
+
+(define-ac-rule initial ()
+  (text (prog1 (character-ranges (#\A #\Z)) #\.)))
+
+(define-ac-rule full-name ()
+  (let* ((initials (times initial))
+	 (surname surname))
+    (cons surname initials)))
+
+(define-ac-rule wh-char ()
+  (|| #\space #\tab #\newline #\return))
+(define-ac-rule whitespace ()
+  (postimes wh-char))
+
+(define-ac-rule et-al ()
+  "et al." :etal)
+	
+(defmacro!! define-plural-rule (name single delim) ()
+  `(define-ac-rule ,name ()
+     (cons ,single
+	   (times (progn ,delim ,single)))))
+
+(define-plural-rule full-names full-name (progn (? whitespace) #\, (? whitespace)))
+
+(defmacro wh (x)
+  `(progn whitespace ,x))
+
+(defmacro wh? (x)
+  `(progn (? whitespace) ,x))
+
+(defmacro ?wh (x)
+  `(? (progn whitespace ,x)))
+
+(defmacro ?wh? (x)
+  `(? (progn (? whitespace) ,x)))
+
+(define-ac-rule bibitem-label ()
+  (text (progm #\{ (postimes (!! #\})) #\})))
+
+(define-ac-rule bf-journal-spec ()
+  (let ((meat (text (progm (progn #\{ (? whitespace) "\\bf" whitespace)
+			   (postimes (!! #\}))
+			   #\}))))
+    (string-whitespace-trim meat)))
+
+(defun string-whitespace-trim (str)
+  (string-trim '(#\space #\tab #\newline #\return) str))
+
+(define-ac-rule simple-surname ()
+  (text (list (character-ranges (#\A #\Z))
+	      (postimes (|| (character-ranges (#\a #\z))
+			    (list #\\ (|| #\' #\")))))))
+
+(define-ac-rule simple-initial ()
+  (text (prog1 (character-ranges (#\A #\Z)) #\.)))
+
+(define-plural-rule simple-initials simple-initial (? whitespace))
+
+(define-ac-rule simple-author-name ()
+  (let* ((initials simple-initials)
+	 (surname (wh? simple-surname)))
+    (cons surname initials)))
+
+(define-ac-rule comma-and-delim ()
+  (|| (progn #\, (? whitespace) "and")
+      #\,
+      "and"))
+
+(define-plural-rule comma-and-authors simple-author-name (progn (? whitespace)
+								comma-and-delim
+								(? whitespace)))
+
+(define-ac-rule simple-journal-name ()
+  (string-whitespace-trim
+   (text (postimes (|| #\space #\tab #\newline #\return #\.
+		       (character-ranges (#\a #\z) (#\A #\Z)))))))
+
+(define-ac-rule it-paper-name ()
+  (let ((meat (text (progm (progn #\{ (? whitespace) "\\it" whitespace)
+			   (postimes (!! #\}))
+			   #\}))))
+    (string-trim '((literal-char #\,))
+		 (string-whitespace-trim meat))))
+
+
+(define-ac-rule elt-9201003-bibitem ()
+  (let* ((authors comma-and-authors)
+	 (name (?wh it-paper-name))
+	 (jname (wh? simple-journal-name))
+	 (jspec (wh? bf-journal-spec))
+	 (year (wh? bracket-year))
+	 (page (wh? page-number)))
+    `(,!m(inject-kwds-if-nonnil authors name jname jspec year page))))
+    
+
+(define-ac-rule 9201003-bibitem ()
+  (let* ((label (wh? bibitem-label))
+	 (rest (wh? 9201003-bibitem-meat)))
+    (list label rest)))
+
+(define-ac-rule bibitem ()
+  (|| 9201003-bibitem))
+      
+
+(defun parse-bibitem (bibitem)
+  (ac-parse 'bibitem bibitem))
+
+(defun bibitem-cleanly-parseable (bibitem)
+  (handler-case (progn (parse-bibitem bibitem) t)
+    (error () nil)))
+
+(defparameter *citation-parsing-threshold* 0.6)
+
+(defun find-first-critical-paper (&optional (year 1992))
+  (iter outer (for fname in (list-directory #?"~/$(year)-bibitems"))
+	(for i from 1 to 10)
+	(let ((bibitems (to-bibitems (extract-bibliography (slurp-file fname)))))
+	  (iter (for bibitem in bibitems)
+		(summing 1 into total)
+		(if (bibitem-cleanly-parseable (cadr bibitem))
+		    (summing 1 into clean))
+		(finally (let ((clean-ratio (if (zerop total)
+						0
+						(float (/ clean total)))))
+			   (if (and (< 0 total)
+				    (> *citation-parsing-threshold* clean-ratio))
+			       (return-from find-first-critical-paper
+				 (values fname clean-ratio)))))))))
+			       
+			       
