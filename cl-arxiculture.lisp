@@ -407,6 +407,10 @@
 		       #\-
 		       (character-ranges (#\a #\z) (#\A #\Z) (#\0 #\9)))))))
 
+(define-ac-rule braces-reader ()
+  (let ((things
+  (text (times 
+
 (define-ac-rule it-paper-name ()
   (let ((meat (text (progm (progn #\{ (? whitespace) "\\it" whitespace)
 			   (postimes (!! #\}))
@@ -497,10 +501,21 @@
 
 (defun find-first-critical-paper (&optional (year 1992))
   (iter outer (for fname in (list-directory #?"~/$(year)-bibitems"))
-	(let ((ratio (coverage-ratio fname)))
+	(let ((ratio (handler-case (coverage-ratio fname)
+		       (error () (next-iteration)))))
 	  (if (> *citation-parsing-threshold* ratio)
-	      (values fname ratio)))))
-			       
+	      (return-from outer (values fname ratio))))))
+
+(defun coverage-histogram (&optional (year 1992))
+  (let ((bins (make-array 10 :element-type 'integer :initial-element 0)))
+    (iter outer (for fname in (list-directory #?"~/$(year)-bibitems"))
+	  (let ((ratio (handler-case (coverage-ratio fname)
+			 (error () 0))))
+	    (format t "~a~%" ratio)
+	    (incf (aref bins (min (floor (* 10 ratio))
+				  9)))))
+    (format t "~a: ~{~a~^ ~}~%" year (coerce bins 'list))))
+
 			       
 ;; Reasons, why this naive parsing does not work
 ;; * there may be {\\sl} and whatnot in journal name
