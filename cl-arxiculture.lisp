@@ -301,7 +301,7 @@
     (cons surname initials)))
 
 (define-ac-rule wh-char ()
-  (|| #\space #\tab #\newline #\return))
+  (|| #\space #\tab #\newline #\return #\~))
 (define-ac-rule whitespace ()
   (postimes wh-char))
 
@@ -372,24 +372,36 @@
   (let ((meat (text (progm (progn #\{ (? whitespace) "\\it" whitespace)
 			   (postimes (!! #\}))
 			   #\}))))
-    (string-trim '((literal-char #\,))
-		 (string-whitespace-trim meat))))
+    (comb-paper-name (string-whitespace-trim meat))))
+
+(defun comb-paper-name (str)
+  (regex-replace-all "\\s+" (string-trim '(#\,) str) " "))
 
 
 (define-ac-rule elt-9201003-bibitem ()
-  (let* ((authors comma-and-authors)
+  (let* ((authors (prog1 comma-and-authors (? #\,)))
 	 (name (?wh it-paper-name))
 	 (jname (wh? simple-journal-name))
 	 (jspec (wh? bf-journal-spec))
 	 (year (wh? bracket-year))
 	 (page (wh? page-number)))
     `(,!m(inject-kwds-if-nonnil authors name jname jspec year page))))
+
+(define-ac-rule 9201003-bibitem-delim ()
+  (|| #\;
+      (progn #\. #\\ #\\)))
     
+(define-plural-rule %9201003-bibitem-meat elt-9201003-bibitem (progn (? whitespace)
+								     9201003-bibitem-delim
+								     (? whitespace)))
+(define-ac-rule 9201003-bibitem-meat ()
+  (prog1 %9201003-bibitem-meat
+    (? whitespace) (? #\.) (? whitespace)))
 
 (define-ac-rule 9201003-bibitem ()
   (let* ((label (wh? bibitem-label))
 	 (rest (wh? 9201003-bibitem-meat)))
-    (list label rest)))
+    (cons label rest)))
 
 (define-ac-rule bibitem ()
   (|| 9201003-bibitem))
