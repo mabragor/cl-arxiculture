@@ -57,4 +57,6 @@ Banks, M. Douglas, N. Seiberg, and S. Shenker, {\\it Microscopic and macroscopic
 loops in nonperturbative two dimensional gravity,} Phys. Lett. {\\bf 238B} (1990)~279.
   
 ")))
+  (is (equal nil (ac-parse 'simple-surname "Asdf." :junk-allowed t)))
+  (is (equal '("Zuber" "J" "-B") (ac-parse 'simple-author-name "J.-B. Zuber")))
   )

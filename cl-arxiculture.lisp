@@ -286,8 +286,26 @@
 	(fail-parse "Integer not in 1900 -- 9999 range to be counted as a valid year"))
     it))
 
+(define-ac-rule place ()
+  (|| (progn "Utrecht" :utrecht)))
+
+(define-ac-rule publisher ()
+  (|| (progn "Springer" :springer)))
+
 (define-ac-rule bracket-year ()
-  (progm #\( year #\)))
+  #\(
+  (let ((something (? (|| (let ((it (prog1 month (? whitespace) #\, (? whitespace))))
+			    `(:month ,it))
+			  (let ((it (prog1 place (? whitespace) #\, (? whitespace))))
+			    `(:place ,it))
+			  (let ((it (prog1 publisher (? whitespace) #\, (? whitespace))))
+			    `(:publisher ,it))
+			  )))
+	(year year))
+    #\)
+    (if (not something)
+	year
+	`(,year ,something))))
 
 (define-ac-rule surname ()
   (text (character-ranges (#\A #\Z)) (postimes (character-ranges (#\a #\z)))))
@@ -339,19 +357,39 @@
 (defun string-whitespace-trim (str)
   (string-trim '(#\space #\tab #\newline #\return) str))
 
+(define-ac-rule ss-begin-char ()
+  (character-ranges (#\A #\Z)))
+
+(define-ac-rule ss-middle-char ()
+  (|| (character-ranges (#\a #\z))
+      (list #\\ (|| #\' #\"))
+      (list #\- (|| ss-begin-char ss-middle-char))))
+
 (define-ac-rule simple-surname ()
-  (text (list (character-ranges (#\A #\Z))
-	      (postimes (|| (character-ranges (#\a #\z))
-			    (list #\\ (|| #\' #\")))))))
+  (text ss-begin-char
+	(postimes ss-middle-char)
+	(! #\.)))
+
+(define-ac-rule surname ()
+  (let ((prefix (? (prog1 (|| "van" "de")
+		     whitespace)))
+	(surname simple-surname))
+    (if prefix
+	(list prefix surname)
+	surname)))
+	
 
 (define-ac-rule simple-initial ()
-  (text (prog1 (character-ranges (#\A #\Z)) #\.)))
+  (text (list (? #\-)
+	      (prog1 (list (character-ranges (#\A #\Z))
+			   (times (character-ranges (#\a #\z)) :upto 2))
+		#\.))))
 
 (define-plural-rule simple-initials simple-initial (? whitespace))
 
 (define-ac-rule simple-author-name ()
   (let* ((initials simple-initials)
-	 (surname (wh? simple-surname)))
+	 (surname (wh? surname)))
     (cons surname initials)))
 
 (define-ac-rule comma-and-delim ()
@@ -365,8 +403,9 @@
 
 (define-ac-rule simple-journal-name ()
   (string-whitespace-trim
-   (text (postimes (|| #\space #\tab #\newline #\return #\.
-		       (character-ranges (#\a #\z) (#\A #\Z)))))))
+   (text (postimes (|| #\space #\tab #\newline #\return #\. #\/
+		       #\-
+		       (character-ranges (#\a #\z) (#\A #\Z) (#\0 #\9)))))))
 
 (define-ac-rule it-paper-name ()
   (let ((meat (text (progm (progn #\{ (? whitespace) "\\it" whitespace)
@@ -379,12 +418,13 @@
 
 
 (define-ac-rule elt-9201003-bibitem ()
-  (let* ((authors (prog1 comma-and-authors (? #\,)))
+  (let* ((authors (? (prog1 comma-and-authors (? #\,))))
 	 (name (?wh it-paper-name))
 	 (jname (wh? simple-journal-name))
-	 (jspec (wh? bf-journal-spec))
-	 (year (wh? bracket-year))
-	 (page (wh? page-number)))
+	 (jspec (? (wh? bf-journal-spec)))
+	 (year (wh? (|| bracket-year
+			year)))
+	 (page (? (wh? page-number))))
     `(,!m(inject-kwds-if-nonnil authors name jname jspec year page))))
 
 (define-ac-rule 9201003-bibitem-delim ()
@@ -414,22 +454,56 @@
   (handler-case (progn (parse-bibitem bibitem) t)
     (error () nil)))
 
+(defun coverage-ratio (fname)
+  (let ((bibitems (to-bibitems (extract-bibliography (slurp-file fname)))))
+    (iter (for bibitem in bibitems)
+	  (summing 1 into total)
+	  (if (bibitem-cleanly-parseable (cadr bibitem))
+	      (summing 1 into clean))
+	  (finally (return (if (zerop total)
+			       0
+			       (float (/ clean total))))))))
+
+(eval-when (:compile-toplevel :load-toplevel :execute)
+  (defparameter *months* '(:january :february :march :april :may :june :july :august
+			   :september :october :november :december)))
+
+(defmacro case-insensitive-rule-from-kwd (kwd)
+  (let ((ustr (string-upcase kwd))
+	(dstr (string-downcase kwd))
+	(rule-name (intern #?"CI-$((string kwd))-RULE")))
+    `(define-ac-rule ,rule-name ()
+       (progn ,@(mapcar (lambda (x y)
+			  `(character-ranges ,x ,y))
+			(coerce ustr 'list)
+			(coerce dstr 'list))
+	      ,kwd))))
+
+(defmacro case-insensitive-rule-from-kwds (kwds)
+  `(progn ,@(mapcar (lambda (x)
+		      `(case-insensitive-rule-from-kwd ,x))
+		    (symbol-value kwds))))
+
+(defmacro define-ci-alt-rule (name var)
+  `(progn (case-insensitive-rule-from-kwds ,var)
+	  (define-ac-rule ,name ()
+	    (|| ,@(mapcar (lambda (x)
+			    `(descend-with-rule ',(intern #?"CI-$((string x))-RULE")))
+			  (symbol-value var))))))
+
+(define-ci-alt-rule month *months*)
+
 (defparameter *citation-parsing-threshold* 0.6)
 
 (defun find-first-critical-paper (&optional (year 1992))
   (iter outer (for fname in (list-directory #?"~/$(year)-bibitems"))
-	(for i from 1 to 10)
-	(let ((bibitems (to-bibitems (extract-bibliography (slurp-file fname)))))
-	  (iter (for bibitem in bibitems)
-		(summing 1 into total)
-		(if (bibitem-cleanly-parseable (cadr bibitem))
-		    (summing 1 into clean))
-		(finally (let ((clean-ratio (if (zerop total)
-						0
-						(float (/ clean total)))))
-			   (if (and (< 0 total)
-				    (> *citation-parsing-threshold* clean-ratio))
-			       (return-from find-first-critical-paper
-				 (values fname clean-ratio)))))))))
+	(let ((ratio (coverage-ratio fname)))
+	  (if (> *citation-parsing-threshold* ratio)
+	      (values fname ratio)))))
 			       
 			       
+;; Reasons, why this naive parsing does not work
+;; * there may be {\\sl} and whatnot in journal name
+;; * there may be publisher name in the year
+;; * there may be month in the year
+
