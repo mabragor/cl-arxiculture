@@ -560,6 +560,24 @@
 	 ,!m(inject-kwds-if-nonnil year page))))
 
 
+;; (let (("hpa" . ("Helv" "Phys" "Acta"))
+;;       ("ijmp" . ("Int" "J" "Mod" "Phys"))
+;;       ("pr" . ("Phys" "Rev"))
+;;       ("jetpl" . ("JETP" "Lett"))
+;;       ("prl" . ("Phys" "Rev" "Lett"))
+;;       ("jmp" . ("J" "Math" "Phys"))
+;;       ("rmp" . ("Rev" "Mod" "Phys"))
+;;       ("cmp" . ("Comm" "Math" "Phys"))
+;;       ("cqg" . ("Class" "Quantum" "Grav"))
+;;       ("np" . ("Nucl" "Phys"))
+;;       ("pl" . ("Phys" "Lett"))
+;;       ("prep" . ("Phys" "Reports"))
+;;       ("ptp" . ("Progr" "Theor" "Phys"))
+;;       ("annp" . ("Ann" "Phys" "(N.Y.)"))
+;;       ("nc" . ("Nuovo" "Cim")))
+;;   nil)
+
+
 (defun parse-bibitem (bibitem)
   (ac-parse 'bibitem bibitem))
 
@@ -703,3 +721,5 @@
   (mapcar (lambda (x)
 	    (parse-or-leave-as-is (cadr x)))
 	  (to-bibitems (extract-bibliography (slurp-file fname)))))
+
+(defparameter *begin-document-re* #?/\\begin\s*{\s*document\s*}/)
