@@ -407,9 +407,9 @@
 		       #\-
 		       (character-ranges (#\a #\z) (#\A #\Z) (#\0 #\9)))))))
 
-(define-ac-rule braces-reader ()
-  (let ((things
-  (text (times 
+;; (define-ac-rule braces-reader ()
+;;   (let ((things
+;;   (text (times 
 
 (define-ac-rule it-paper-name ()
   (let ((meat (text (progm (progn #\{ (? whitespace) "\\it" whitespace)
