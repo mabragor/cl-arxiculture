@@ -349,7 +349,7 @@
   (text (progm #\{ (postimes (!! #\})) #\})))
 
 (define-ac-rule bf-journal-spec ()
-  (let ((meat (text (progm (progn #\{ (? whitespace) "\\bf" whitespace)
+  (let ((meat (text (progm (progn #\{ (? whitespace) (|| #\\ #\/) "bf" whitespace)
 			   (postimes (!! #\}))
 			   #\}))))
     (string-whitespace-trim meat)))
@@ -370,12 +370,19 @@
 	(postimes ss-middle-char)
 	(! #\.)))
 
+(define-ac-rule exceptional-surname ()
+  (|| "DeWitt" "Aref`eva"
+      "Ambj\\o rn"
+      "Fr\\\"{o}hlich"
+      "Br\\'{e}zin"))
+
 (define-ac-rule surname ()
-  (let ((prefix (? (prog1 (|| "van" "de")
-		     whitespace)))
-	(surname simple-surname))
-    (if prefix
-	(list prefix surname)
+  (let ((prefices (times (prog1 (|| "van" "de" "'t")
+			   whitespace)))
+	(surname (|| exceptional-surname
+		     simple-surname)))
+    (if prefices
+	`(,@prefices ,surname)
 	surname)))
 	
 
@@ -392,6 +399,11 @@
 	 (surname (wh? surname)))
     (cons surname initials)))
 
+(define-ac-rule simple-reverse-author-name ()
+  (let* ((surname surname)
+	 (initials (wh? simple-initials)))
+    (cons surname initials)))
+
 (define-ac-rule comma-and-delim ()
   (|| (progn #\, (? whitespace) "and")
       #\,
@@ -401,11 +413,23 @@
 								comma-and-delim
 								(? whitespace)))
 
+(define-plural-rule comma-and-reverse-authors
+    simple-reverse-author-name
+  (progn (? whitespace)
+	 comma-and-delim
+	 (? whitespace)))
+
+
+(define-ac-rule simple-cap-word ()
+  (text (list (character-ranges (#\A #\Z))
+	      (times (character-ranges (#\a #\z))))))
+
+(define-ac-rule simple-jname-sep ()
+  (|| whitespace
+      (progn #\. (? whitespace))))
+  
 (define-ac-rule simple-journal-name ()
-  (string-whitespace-trim
-   (text (postimes (|| #\space #\tab #\newline #\return #\. #\/
-		       #\-
-		       (character-ranges (#\a #\z) (#\A #\Z) (#\0 #\9)))))))
+  (postimes (prog1 simple-cap-word simple-jname-sep)))
 
 ;; (define-ac-rule braces-reader ()
 ;;   (let ((things
@@ -421,20 +445,58 @@
   (regex-replace-all "\\s+" (string-trim '(#\,) str) " "))
 
 
+(define-ac-rule journal-stuff ()
+  (let* ((jname (wh? simple-journal-name))
+	 (jspec (? (wh? bf-journal-spec))))
+    `(,!m(inject-kwds-if-nonnil jname jspec))))
+
+(define-ac-rule preprint-start-letters ()
+  (character-ranges (#\A #\Z)))
+(define-ac-rule preprint-end-letters ()
+  (character-ranges (#\0 #\9)))
+(define-ac-rule preprint-delim ()
+  (|| #\- #\/ #\.))
+
+(define-ac-rule preprint-spec ()
+  (text (postimes (|| preprint-start-letters preprint-delim))
+	(postimes (|| preprint-end-letters preprint-delim))))
+
+(define-plural-rule preprint-specs preprint-spec (progn (? whitespace) #\, (? whitespace)))
+
+(define-ac-rule preprint-stuff ()
+  "preprint" (? #\,) (? whitespace)
+  `((:preprint t) (:pspec ,preprint-specs)))
+
 (define-ac-rule elt-9201003-bibitem ()
   (let* ((authors (? (prog1 comma-and-authors (? #\,))))
 	 (name (?wh it-paper-name))
-	 (jname (wh? simple-journal-name))
-	 (jspec (? (wh? bf-journal-spec)))
+	 (journal (? journal-stuff))
+	 (preprint (? preprint-stuff))
 	 (year (wh? (|| bracket-year
 			year)))
 	 (page (? (wh? page-number))))
-    `(,!m(inject-kwds-if-nonnil authors name jname jspec year page))))
+    `(,!m(inject-kwds-if-nonnil authors name)
+	 ,@journal ,@preprint
+	 ,!m(inject-kwds-if-nonnil year page))))
+
+(define-ac-rule semicolon-delim ()
+  #\;)
+(define-ac-rule semicolon-slash-delim ()
+  #\; (? whitespace) #\\ #\\)
+(define-ac-rule dot-slash-delim ()
+  #\. (? whitespace) #\\ #\\)
 
 (define-ac-rule 9201003-bibitem-delim ()
-  (|| #\;
-      (progn #\. #\\ #\\)))
-    
+  (|| semicolon-delim
+      dot-slash-delim))
+
+(define-ac-rule 9502152-bibitem-delim ()
+  semicolon-delim)
+
+(define-ac-rule 9212154-bibitem-delim ()
+  (|| #\,
+      semicolon-slash-delim))
+
 (define-plural-rule %9201003-bibitem-meat elt-9201003-bibitem (progn (? whitespace)
 								     9201003-bibitem-delim
 								     (? whitespace)))
@@ -442,14 +504,82 @@
   (prog1 %9201003-bibitem-meat
     (? whitespace) (? #\.) (? whitespace)))
 
+(define-plural-rule %9502152-bibitem-meat elt-9502152-bibitem (progn (? whitespace)
+								     9502152-bibitem-delim
+								     (? whitespace)))
+
+(define-plural-rule %9212154-bibitem-meat elt-9212154-bibitem (progn (? whitespace)
+								     9212154-bibitem-delim
+								     (? whitespace)))
+(define-ac-rule 9212154-bibitem-meat ()
+  (prog1 %9212154-bibitem-meat
+    (? whitespace) (? #\.) (? whitespace)))
+
+
+(define-ac-rule 9502152-bibitem-meat ()
+  (prog1 %9502152-bibitem-meat
+    (? whitespace) (? #\.) (? whitespace)))
+
 (define-ac-rule 9201003-bibitem ()
   (let* ((label (wh? bibitem-label))
 	 (rest (wh? 9201003-bibitem-meat)))
     (cons label rest)))
 
+(define-ac-rule 9212154-bibitem ()
+  (let* ((label (wh? bibitem-label))
+	 (rest (wh? 9212154-bibitem-meat)))
+    (cons label rest)))
+
+
+(define-ac-rule 9502152-bibitem ()
+  (let* ((label (wh? bibitem-label))
+	 (rest (wh? 9502152-bibitem-meat)))
+    (cons label rest)))
+
 (define-ac-rule bibitem ()
-  (|| 9201003-bibitem))
-      
+  (most-full-parse 9201003-bibitem
+		   9502152-bibitem
+		   9212154-bibitem
+		   ))
+
+(define-plural-rule comma-page-numbers page-number (progn (? whitespace) #\, (? whitespace)))
+
+(define-ac-rule elt-9502152-bibitem ()
+  (let* ((authors (? (prog1 comma-and-reverse-authors (? #\,))))
+	 (year (wh? year))
+	 (jname (wh? simple-journal-name))
+	 (jspec (? (wh? bf-journal-spec)))
+	 (page (wh? comma-page-numbers)))
+    `(,!m(inject-kwds-if-nonnil authors jname jspec year page))))
+
+(define-ac-rule elt-9212154-bibitem ()
+  (let* ((authors (? (prog1 comma-and-authors (? #\,))))
+	 (journal (? journal-stuff))
+	 (preprint (? (progn (? whitespace) preprint-stuff)))
+	 (year (wh? bracket-year))
+	 (page (? (wh? comma-page-numbers))))
+    `(,!m(inject-kwds-if-nonnil authors)
+	 ,@journal ,@preprint
+	 ,!m(inject-kwds-if-nonnil year page))))
+
+
+;; (let (("hpa" . ("Helv" "Phys" "Acta"))
+;;       ("ijmp" . ("Int" "J" "Mod" "Phys"))
+;;       ("pr" . ("Phys" "Rev"))
+;;       ("jetpl" . ("JETP" "Lett"))
+;;       ("prl" . ("Phys" "Rev" "Lett"))
+;;       ("jmp" . ("J" "Math" "Phys"))
+;;       ("rmp" . ("Rev" "Mod" "Phys"))
+;;       ("cmp" . ("Comm" "Math" "Phys"))
+;;       ("cqg" . ("Class" "Quantum" "Grav"))
+;;       ("np" . ("Nucl" "Phys"))
+;;       ("pl" . ("Phys" "Lett"))
+;;       ("prep" . ("Phys" "Reports"))
+;;       ("ptp" . ("Progr" "Theor" "Phys"))
+;;       ("annp" . ("Ann" "Phys" "(N.Y.)"))
+;;       ("nc" . ("Nuovo" "Cim")))
+;;   nil)
+
 
 (defun parse-bibitem (bibitem)
   (ac-parse 'bibitem bibitem))
@@ -457,6 +587,10 @@
 (defun bibitem-cleanly-parseable (bibitem)
   (handler-case (progn (parse-bibitem bibitem) t)
     (error () nil)))
+
+(defun parse-or-leave-as-is (bibitem)
+  (handler-case (parse-bibitem bibitem)
+    (error () bibitem)))
 
 (defun coverage-ratio (fname)
   (let ((bibitems (to-bibitems (extract-bibliography (slurp-file fname)))))
@@ -467,6 +601,12 @@
 	  (finally (return (if (zerop total)
 			       0
 			       (float (/ clean total))))))))
+
+(defun parse-what-you-can (fname)
+  (mapcar (lambda (x)
+	    (parse-or-leave-as-is (cadr x)))
+	  (to-bibitems (extract-bibliography (slurp-file fname)))))
+
 
 (eval-when (:compile-toplevel :load-toplevel :execute)
   (defparameter *months* '(:january :february :march :april :may :june :july :august
@@ -511,7 +651,7 @@
     (iter outer (for fname in (list-directory #?"~/$(year)-bibitems"))
 	  (let ((ratio (handler-case (coverage-ratio fname)
 			 (error () 0))))
-	    (format t "~a~%" ratio)
+	    (format t "~a~t~t~t ~a~%" ratio (car (last (split "/" (format nil "~a" fname)))))
 	    (incf (aref bins (min (floor (* 10 ratio))
 				  9)))))
     (format t "~a: ~{~a~^ ~}~%" year (coerce bins 'list))))
@@ -522,3 +662,67 @@
 ;; * there may be publisher name in the year
 ;; * there may be month in the year
 
+;; Let's see, what I can say about journals and authors based on the limited data I've parsed...
+;; The idea is to make some sort of "sensory bootstrap" -- we start with
+;; a limited, almost retarded parser, which does only small fraction of examples
+;; We use it, however, to gather additional data about the set.
+;; Using this data (such as what the journals, in principle, are) we may build
+;; more elaborate parsers...
+
+(defun append-to-dataset (&optional (year 1992))
+  (with-open-file (stream "~/arXiv-bibitems-dataset.txt"
+			  :direction :output :if-exists :append
+			  :if-does-not-exist :create)
+    (iter outer (for fname in (list-directory #?"~/$(year)-bibitems"))
+	  (iter (for bibitem in (handler-case (to-bibitems (extract-bibliography (slurp-file fname)))
+				  (error () (next-iteration))))
+		(let ((it (parse-or-leave-as-is (cadr bibitem))))
+		  (when (not (stringp it))
+		    (format stream "~s~%" it)))))))
+
+(defparameter *dataset* nil)
+
+(defun reload-dataset ()
+  (setf *dataset* nil)
+  (iter (for form in-file "~/arXiv-bibitems-dataset.txt" using #'read)
+	;; (for i from 1 to 10)
+	(push form *dataset*)
+	;; (format t "~a~%" form)
+	)
+  (setf *dataset* (nreverse *dataset*))
+  :success!)
+
+(defun different-jnames-hash ()
+  (let ((res (make-hash-table :test #'equal)))
+    (iter (for (label item) in *dataset*)
+	  (let ((it (assoc :jname item)))
+	    (when it
+	      (incf (gethash (cadr it) res 0)))))
+    res))
+
+(defun different-jnames-words-hash ()
+  (let ((res (make-hash-table :test #'equal)))
+    (iter (for (label item) in *dataset*)
+	  (let ((it (assoc :jname item)))
+	    (when it
+	      (iter (for word in (cadr it))
+		    (incf (gethash word res 0))))))
+    res))
+
+(defun hash->assoc (hash)
+  (iter (for (key val) in-hashtable hash)
+	(collect (cons key val))))
+
+(defun jnames-chart ()
+  (sort (hash->assoc (different-jnames-hash)) #'> :key #'cdr))
+
+(defun jnames-words-chart ()
+  (sort (hash->assoc (different-jnames-words-hash)) #'> :key #'cdr))
+
+
+(defun parse-what-you-can (fname)
+  (mapcar (lambda (x)
+	    (parse-or-leave-as-is (cadr x)))
+	  (to-bibitems (extract-bibliography (slurp-file fname)))))
+
+(defparameter *begin-document-re* #?/\\begin\s*{\s*document\s*}/)

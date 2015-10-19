@@ -10,7 +10,8 @@
 			     #:esrap-liquid #:cl-read-macro-tokens #:quasiquote-2.0)
   :components ((:file "package")
 	       (:file "parsing-macro")
-               (:file "cl-arxiculture")))
+               (:file "cl-arxiculture")
+	       (:file "cite-patterns")))
 
 (defsystem :cl-arxiculture-tests
   :description "Tests for CL-ARXICULTURE"
