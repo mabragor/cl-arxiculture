@@ -7,11 +7,13 @@
   :version "0.1"
   :serial t
   :depends-on (#:cl-interpol #:cl-ppcre #:iterate #:clesh #:cl-fad #:lol-re
-			     #:esrap-liquid #:cl-read-macro-tokens #:quasiquote-2.0)
+			     #:esrap-liquid #:cl-read-macro-tokens #:quasiquote-2.0
+			     #:cl-itertools #:cl-arxiv-api)
   :components ((:file "package")
 	       (:file "parsing-macro")
                (:file "cl-arxiculture")
-	       (:file "cite-patterns")))
+	       (:file "cite-patterns")
+	       (:file "fetch-arxiv-metadata")))
 
 (defsystem :cl-arxiculture-tests
   :description "Tests for CL-ARXICULTURE"

@@ -49,8 +49,8 @@
 
 (defparameter *bibitem-re* #?/\\bibitem{\s*([^}]+)\s*}/)
 
-(defparameter *arxiv-re-1* #?/(?i)arXiv[.:]+[0-9.]+/)
-(defparameter *arxiv-re-2* #?/(?i)(arXiv[.:]+)?hep-[tp]h\/{?[0-9.]+}?/)
+(defparameter *arxiv-re-1* #?/(?i)arXiv[.:]+([0-9.]+)/)
+(defparameter *arxiv-re-2* #?/(?i)(arXiv[.:]+)?hep-[tp]h\/{?([0-9.]+)}?/)
 
 (defparameter *work-dir* "~/2003/")
 
@@ -218,7 +218,7 @@
     (subseq text (cadr begins) (car ends))))
 
 (defun to-bibitems (text)
-  (mapcar #'analog-parse-bibitem (cdr (split #?/\\bibitem/ text))))
+  (mapcar #'analog-parse-bibitem (cdr (split #?/\\bi(bitem)?/ text))))
 
 (defun analog-parse-bibitem (text)
   (let ((label (progn (m~ #?/^{([^}]+)}/ text) (list $1 $-0 $+0))))
@@ -525,6 +525,32 @@
 	 (rest (wh? 9201003-bibitem-meat)))
     (cons label rest)))
 
+(define-ac-rule sloppy-authors ()
+  (let* ((label (wh? bibitem-label))
+	 (junk (times (!! (character-ranges (#\A #\Z)))))
+	 (authors (wh? (most-full-parse comma-and-authors
+					comma-and-reverse-authors))))
+    (declare (ignore label))
+    authors))
+
+(defun sloppy-parse-authors (str)
+  (ac-parse 'sloppy-authors str :junk-allowed t))
+
+(defun sloppy-parse-year (str)
+  (iter (for start from 0 to (1- (length str)))
+	(let ((year (ac-parse 'year str :start start :junk-allowed t)))
+	  (if year
+	      (return-from sloppy-parse-year year))))
+  nil)
+
+(defun sloppy-parse-arxiv-id (str)
+  (register-groups-bind (first) (*arxiv-re-1* str)
+    (return-from sloppy-parse-arxiv-id (list :arxiv first)))
+  (register-groups-bind (first second) (*arxiv-re-2* str)
+    (declare (ignore first))
+    (return-from sloppy-parse-arxiv-id (list :hep-th second)))
+  nil)
+  
 (define-ac-rule 9212154-bibitem ()
   (let* ((label (wh? bibitem-label))
 	 (rest (wh? 9212154-bibitem-meat)))
@@ -592,11 +618,11 @@
   (handler-case (parse-bibitem bibitem)
     (error () bibitem)))
 
-(defun coverage-ratio (fname)
+(defun coverage-ratio (fname &optional (criterion #'bibitem-cleanly-parseable))
   (let ((bibitems (to-bibitems (extract-bibliography (slurp-file fname)))))
     (iter (for bibitem in bibitems)
 	  (summing 1 into total)
-	  (if (bibitem-cleanly-parseable (cadr bibitem))
+	  (if (funcall criterion (cadr bibitem))
 	      (summing 1 into clean))
 	  (finally (return (if (zerop total)
 			       0
@@ -646,10 +672,10 @@
 	  (if (> *citation-parsing-threshold* ratio)
 	      (return-from outer (values fname ratio))))))
 
-(defun coverage-histogram (&optional (year 1992))
+(defun coverage-histogram (&key (year 1992) (criterion #'bibitem-cleanly-parseable))
   (let ((bins (make-array 10 :element-type 'integer :initial-element 0)))
     (iter outer (for fname in (list-directory #?"~/$(year)-bibitems"))
-	  (let ((ratio (handler-case (coverage-ratio fname)
+	  (let ((ratio (handler-case (coverage-ratio fname criterion)
 			 (error () 0))))
 	    (format t "~a~t~t~t ~a~%" ratio (car (last (split "/" (format nil "~a" fname)))))
 	    (incf (aref bins (min (floor (* 10 ratio))
@@ -726,3 +752,17 @@
 	  (to-bibitems (extract-bibliography (slurp-file fname)))))
 
 (defparameter *begin-document-re* #?/\\begin\s*{\s*document\s*}/)
+
+
+
+(defun permanent-id (str paper-year)
+  (or (sloppy-parse-arxiv-id str)
+      (let ((year (sloppy-parse-year str))
+	    (authors (sloppy-parse-authors str)))
+	(imply-permanent-id authors (if year
+					(min year paper-year)
+					paper-year)))))
+
+;; (defun imply-permanent-id (authors year)
+;;   some-magic
+;;   ...)
