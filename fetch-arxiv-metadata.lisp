@@ -8,7 +8,6 @@
 
 (in-package #:cl-arxiv-api)
 
-
 (use-package '(:cl-itertools))
 
 (defmacro splice-kwd-if-nonnil (name)
@@ -26,13 +25,13 @@
     (iter (while t)
 	  (let ((bunch (parse-oai-pmh-response
 			(if-first-time (apply #'arxiv-list-records
-					      `(,!m(splice-kwds-if-nonnil :metadata-prefix
-									  :from
-									  :until
-									  :set)))
+					      `(,!m(splice-kwds-if-nonnil metadata-prefix
+									  from
+									  until
+									  set)))
 				       (if (not resumption-token)
 					   (terminate)
-					   (arxiv-list-records :resumption-token ,g!-resumption-token))))))
+					   (arxiv-list-records :resumption-token resumption-token))))))
 	    (setf resumption-token nil)
 	    (iter (for elt in bunch)
 		  (cond ((not elt) (next-iteration))
@@ -42,5 +41,10 @@
 			     (setf resumption-token (cadr elt))))
 			(t (yield elt))))))))
 
-
+;; TODO : maybe, I can write more flexible one, that changes
+;;        chunk size dynamically?
+;; TODO : special i!- syntax for the things that should be ensured iterators?
+(defiter ichunk (size iterable) ()
+  (let ((iter (mk-iter iterable)))
+    ...))
 
