@@ -192,3 +192,53 @@ transition to the local minimum SF state.
 	  res))))
 
 ;; OK, now let's try to query our database
+
+;; Now that putting data from iterator into database works (and also fetching back)
+;; I need to write a loop over all dates from the minimal one to the current one
+;; (with persistence)
+
+(defun leap-year-p (year)
+  (cond ((not (zerop (mod year 4))) nil)
+	((not (zerop (mod year 100))) t)
+	((not (zerop (mod year 400))) nil)
+	(t t)))
+
+(defparameter *days-in-month*
+  '((1 . 31) (2 . 28) (3 . 31) (4 . 30) (5 . 31) (6 . 30)
+    (7 . 31) (8 . 31) (9 . 30) (10 . 31) (11 . 30) (12 . 31)))
+
+(defparameter *date-re* "^(\\d{4})-(\\d{2})-(\\d{2})$")
+
+(defun parse-date (str)
+  (register-groups-bind (y m d) (*date-re* str)
+    (mapcar #'parse-integer (list y m d))))
+
+(defun days-in-month (month year)
+  (let ((naive (cdr (assoc month *days-in-month* :test #'equal))))
+    (if (and (leap-year-p year)
+	     (equal 2 month))
+	(1+ naive)
+	naive)))
+      
+
+(defiter date-iter (start) ()
+  (destructuring-bind (start-y start-m start-d) (parse-date start)
+    (iter (for year from start-y)
+	  (if-first-time (iter (for month from start-m to 12)
+			       (if-first-time (iter (for day from start-d to (days-in-month month year))
+						    (yield (list year month day)))
+					      (iter (for day from 1 to (days-in-month month year))
+						    (yield (list year month day)))))
+			 (iter (for month from 1 to 12)
+			       (iter (for day from 1 to (days-in-month month year))
+				     (yield (list year month day))))))))
+  
+(defparameter *arxiv-load-lock-fname* "~/quicklisp/local-projects/cl-arxiculture/load.lock")
+
+(defun fetch-all-metadata ()
+  (let ((start-date (or load-from-lock-file
+			fetch-from-arxiv)))
+    (iter (for (y m d) in-it (date-iter start-date))
+	  (with-open-file (stream #?"$(*arxiv-load-lock-fname*)"
+				  :direction :output :if-exists :supersede)
+	    (format stream "~4,'0d-~2,'0a-~2,'0d" y m d)
