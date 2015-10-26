@@ -8,6 +8,8 @@
   :serial t
   :depends-on (#:cl-interpol #:cl-ppcre #:iterate #:clesh #:cl-fad #:lol-re
 			     #:esrap-liquid #:cl-read-macro-tokens #:quasiquote-2.0
+			     #:dbd-mysql #:cl-dbi #:cl-mysql
+			     #:ironclad #:trivial-utf-8
 			     #:cl-itertools #:cl-arxiv-api)
   :components ((:file "package")
 	       (:file "parsing-macro")
