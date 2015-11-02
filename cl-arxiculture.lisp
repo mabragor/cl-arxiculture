@@ -755,14 +755,6 @@
 
 
 
-(defun permanent-id (str paper-year)
-  (or (sloppy-parse-arxiv-id str)
-      (let ((year (sloppy-parse-year str))
-	    (authors (sloppy-parse-authors str)))
-	(imply-permanent-id authors (if year
-					(min year paper-year)
-					paper-year)))))
-
 ;; (defun imply-permanent-id (authors year)
 ;;   some-magic
 ;;   ...)

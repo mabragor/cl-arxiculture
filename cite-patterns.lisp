@@ -19,3 +19,13 @@
 	(let ((it (all-cites fname)))
 	  (format t "~{~a~^,~}~%" (mapcar #'cdr it)))))
 
+(defun essential-cites (cite-lst)
+  (destructuring-bind (first second third fourth fifth sixth seventh . rest) cite-lst
+    (declare (ignore rest))
+    `((3 ,(car first))
+      (2 ,(car second) ,(car third))
+      (1 ,(car fourth) ,(car fifth))
+      (0.5 ,(car sixth) ,(car seventh)))))
+	    
+
+  

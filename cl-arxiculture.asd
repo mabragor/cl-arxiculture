@@ -15,7 +15,8 @@
 	       (:file "parsing-macro")
                (:file "cl-arxiculture")
 	       (:file "cite-patterns")
-	       (:file "fetch-arxiv-metadata")))
+	       (:file "fetch-arxiv-metadata")
+	       (:file "discover-essential-connections")))
 
 (defsystem :cl-arxiculture-tests
   :description "Tests for CL-ARXICULTURE"

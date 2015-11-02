@@ -74,9 +74,12 @@ values")
 
 (defparameter *connection* nil)
 
+(defun arxiv-connect ()
+  (connect :mysql :database-name "arxiculture"
+	   :username "gardener" :password "caramba!"))
+
 (defmacro with-connection (&body body)
-  `(let ((*connection* (connect :mysql :database-name "arxiculture"
-				:username "gardener" :password "caramba!")))
+  `(let ((*connection* (arxiv-connect)))
      (unwind-protect (progn ,@body)
        (disconnect *connection*))))
 
@@ -163,15 +166,29 @@ transition to the local minimum SF state.
 	(cdr (assoc :datestamp (cdr (assoc :header record))))
 	"0000-00-00")))
 
-(defun normalize-author (str)
-  (let ((parts (split "," str)))
-    (if (equal 1 (length parts))
-	(string-downcase (string-trim '(#\space) (car parts)))
-	(format nil "~a ~a"
-		(string-downcase (string-trim '(#\space) (car parts)))
-		(do-matches-as-strings (m "[a-zA-Z]" (cadr parts))
-		  (return (string-downcase m)))))))
 
+(defun normalize-surname (thing)
+  (if (listp thing)
+      (normalize-surname (format nil "~{~a~^ ~}" thing))
+      (string-downcase (string-trim '(#\space) thing))))
+
+(defun %normalize-author-lst (lst)
+  (if (equal 1 (length lst))
+      (normalize-surname (car lst))
+      (format nil "~a ~a"
+	      (normalize-surname (car lst))
+	      (do-matches-as-strings (m "[a-zA-Z]" (cadr lst))
+		(return (string-downcase m))))))
+
+(defun %normalize-author-str (str)
+  (let ((parts (split "," str)))
+    (%normalize-author-lst parts)))
+
+
+(defun normalize-author (thing)
+  (if (stringp thing)
+      (%normalize-author-str thing)
+      (%normalize-author-lst thing)))
 
 (defun get-authors (record)
   (let ((i 0))
