@@ -113,10 +113,10 @@ values")
 
 (defun put-metadata-to-sql (metadata-iter)
   (with-connection
-      (iter (for chunk in-it (cl-arxiv-api:ichunk 100
-						  (imap (lambda (x)
-							  (format nil "(~{'~a'~^, ~})" x))
-							(imap #'comb-for-sql metadata-iter))))
+      (iter (for chunk in-it (cl-arxiv-api::ichunk 100
+						   (imap (lambda (x)
+							   (format nil "(~{'~a'~^, ~})" x))
+							 (imap #'comb-for-sql metadata-iter))))
 	    (execute (prepare *connection* (mk-sql-query chunk)))))
   :success!)
 
@@ -222,7 +222,9 @@ transition to the local minimum SF state.
       
 
 (defiter date-iter (start) ()
-  (destructuring-bind (start-y start-m start-d) (parse-date start)
+  (destructuring-bind (start-y start-m start-d) (if (stringp start)
+						    (parse-date start)
+						    start)
     (iter (for year from start-y)
 	  (if-first-time (iter (for month from start-m to 12)
 			       (if-first-time (iter (for day from start-d to (days-in-month month year))
@@ -235,10 +237,53 @@ transition to the local minimum SF state.
   
 (defparameter *arxiv-load-lock-fname* "~/quicklisp/local-projects/cl-arxiculture/load.lock")
 
-(defun fetch-all-metadata ()
-  (let ((start-date (or load-from-lock-file
-			fetch-from-arxiv)))
-    (iter (for (y m d) in-it (date-iter start-date))
-	  (with-open-file (stream #?"$(*arxiv-load-lock-fname*)"
-				  :direction :output :if-exists :supersede)
-	    (format stream "~4,'0d-~2,'0a-~2,'0d" y m d)
+(defun load-date-from-lockfile ()
+  (if (probe-file *arxiv-load-lock-fname*)
+      (with-open-file (stream *arxiv-load-lock-fname*)
+	(parse-date (read-line stream)))))
+
+(defun yesterday (date)
+  (destructuring-bind (y m d) date
+    (if (> d 1)
+	(list y m (1- d))
+	(if (> m 1)
+	    (list y (1- m) (days-in-month (1- m) y))
+	    (list (1- y) 12 (days-in-month 12 (1- y)))))))
+
+(defun tomorrow (date)
+  (destructuring-bind (y m d) date
+    (if (not (equal (days-in-month m y) d))
+	(list y m (1+ d))
+	(if (not (equal 12 m))
+	    (list y (1+ m) 1)
+	    (list (1+ y) 1 1)))))
+  
+
+(defun fetch-date-from-arxiv ()
+  (let ((response (cl-arxiv-api::parse-oai-pmh-response (cl-arxiv-api::arxiv-identify))))
+    (yesterday (parse-date (cdr (assoc :earliest-datestamp response))))))
+
+(defun fetch-all-metadata (&optional (stop-date "2015-10-25"))
+  (let ((start-date (or ;; (list 2015 08 31)
+			(load-date-from-lockfile)
+			(fetch-date-from-arxiv))))
+    (flet ((save-date (txt-date)
+	     (with-open-file (stream #?"$(*arxiv-load-lock-fname*).new"
+				     :direction :output :if-exists :supersede)
+	       (format stream "~a" txt-date))
+	     (err-script #?"mv $(*arxiv-load-lock-fname*).new $(*arxiv-load-lock-fname*) && sync")))
+      (iter (for (y m d) in-it (date-iter (tomorrow start-date)))
+	    (let ((txt-date (format nil "~4,'0d-~2,'0d-~2,'0d" y m d)))
+	      (if (not (string< txt-date stop-date))
+		  (return))
+	      (format t "Fetching metadata for ~a~%" txt-date)
+	      (handler-case
+		  (put-metadata-to-sql
+		   (cl-arxiv-api::ilist-all-records "oai_dc"
+						    :from txt-date :until txt-date
+						    :set "physics:hep-th"))
+		(cl-arxiv-api::no-records-match ()
+		  (with-open-file (stream #?"~/quicklisp/local-projects/cl-arxiculture/no-recs.txt"
+					  :direction :output :if-exists :append :if-does-not-exist :create)
+		    (format stream "~a~%" txt-date))))
+	      (save-date txt-date))))))
