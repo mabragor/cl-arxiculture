@@ -1,6 +1,9 @@
 
 (in-package #:cl-arxiculture)
 
+(cl-interpol:enable-interpol-syntax)
+(enable-read-macro-tokens)
+
 ;; It seems that there are a lot of metadata for old papers on arxiv, sources of
 ;; whice I do not have
 
@@ -22,13 +25,24 @@
     (iter (for fname in lst)
 	  (yield fname))))
 
-(defun permanent-id (str paper-year id-fetcher)
-  (or (sloppy-parse-arxiv-id str)
-      (let ((year (or (sloppy-parse-year str)
-		      paper-year))
-	    (authors (sloppy-parse-authors str)))
-	(or (cadr (funcall id-fetcher year authors))
-	    `(:id ,year ., authors)))))
+
+
+(defun permanent-id (str paper-submit id-fetcher)
+  (if str
+      (or (sloppy-parse-arxiv-id str)
+	  (let* ((year (sloppy-parse-year str))
+		 (date (if year
+			   (car (sort (list #?"$(year)-12-31" paper-submit)
+				      #'string<))
+			   paper-submit))
+		 (authors (sloppy-parse-authors str)))
+	    (or (cadr (funcall id-fetcher date authors))
+		;; TODO : here we add the logic to crunch new fake IDs
+		(make-new-fake-id (if year
+				      #?"$(year)-01-01"
+				      "0000-00-00")
+				  authors))))
+      (make-new-fake-id paper-submit nil)))
 
 (defun mk-arxiv-id-fetcher ()
   (let ((connection (arxiv-connect)))
@@ -53,11 +67,50 @@ IAS preprint IASSNS-HEP-91/26 (June, 1991).
 
 ")
 
-(defun imply-paper-year (fname)
-  (let ((pre-year (subseq (pathname-name fname) 0 2)))
+(defun fname->id (fname)
+  (let ((it (pathname-name fname)))
+    (if (m~ "\." it)
+	it
+	#?"hep-th/$(it)")))
+
+(defun id->submit (id)
+  (let* ((sql (prepare *connection* "select date_format(min(submitted), '%Y-%m-%d') as submit
+                                     from arxiv_metadata where id = ?"))
+	 (result (execute sql (md5sum id))))
+    (iter (for res next (let ((it (fetch result)))
+			  (or it (terminate))))
+	  (return (getf res :|submit|)))))
+
+(defun id->submit-first-after (id)
+  (let* ((sql (prepare *connection* "select date_format(submitted, '%Y-%m-%d') as submit
+                                     from arxiv_metadata where arxiv_id > ?
+                                     order by arxiv_id asc limit 1"))
+	 (result (execute sql id)))
+    (iter (for res next (let ((it (fetch result)))
+			  (or it (terminate))))
+	  (return (getf res :|submit|)))))
+
+(defun rough-submit (id)
+  (let ((pre-year (if (m~ "^hep-th" id)
+		      (subseq id 7 9)
+		      (subseq id 0 2))))
     (if (char= #\9 (char pre-year 0))
-	#?"19$(pre-year)"
-	#?"20$(pre-year)")))
+	#?"19$(pre-year)-12-31"
+	#?"20$(pre-year)-12-31")))
+      
+(defun id->submit-nmw (id)
+  (or (id->submit id)
+      (id->submit-first-after id)
+      (rough-submit id)))
+
+(defun cite-name->id (name submit bibitems fetcher)
+  (permanent-id (cadr (assoc name bibitems
+			     :test (lambda (x y)
+				     (equal x (car y)))))
+		submit
+		fetcher))
+
+  
 
 (defun essential-cites-as-ids (fname)
   (let* ((cites (essential-cites (all-cites fname)))
@@ -67,12 +120,6 @@ IAS preprint IASSNS-HEP-91/26 (June, 1991).
     (iter (for (weight . names) in cites)
 	  (collect (cons weight (iter (for name in names)
 				      (collect (list name
-						     (permanent-id
-						      (cadr (assoc name bibitems
-								   :test (lambda (x y)
-									   (equal x (car y)))))
-						      (imply-paper-year fname)
-						      fetcher)))))))))
 
 
     

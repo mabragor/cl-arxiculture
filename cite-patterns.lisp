@@ -20,12 +20,15 @@
 	  (format t "~{~a~^,~}~%" (mapcar #'cdr it)))))
 
 (defun essential-cites (cite-lst)
-  (destructuring-bind (first second third fourth fifth sixth seventh . rest) cite-lst
-    (declare (ignore rest))
-    `((3 ,(car first))
-      (2 ,(car second) ,(car third))
-      (1 ,(car fourth) ,(car fifth))
-      (0.5 ,(car sixth) ,(car seventh)))))
-	    
+  (let (prev-weight ratio)
+    (iter (for (weight group) in-it (igroupby cite-lst #'cdr))
+	  (setf ratio (float (if-first-time 1
+					    (* ratio (/ weight prev-weight))))
+		prev-weight weight)
+	  (let ((it (collect-iter (imap #'car group))))
+	    (collect (cons (/ ratio (length it))
+			   it))))))
+			 
+
 
   
