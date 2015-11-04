@@ -25,7 +25,33 @@
     (iter (for fname in lst)
 	  (yield fname))))
 
+(defun new-id-num ()
+  (let ((id (with-open-file (stream "~/quicklisp/local-projects/cl-arxiculture/id-nums.txt" :direction :input)
+	      (read stream))))
+    (with-open-file (stream "~/quicklisp/local-projects/cl-arxiculture/id-nums.txt"
+			    :direction :output :if-exists :supersede)
+      (princ (1+ id) stream))
+    id))
 
+(defun print-authors (authors)
+  (format nil "~{~a~^, ~}"
+	  (mapcar (lambda (x)
+		    (format nil "~a ~{~a~^. ~}" (car x) (cdr x)))
+		  authors)))
+
+(defun make-new-fake-id (date authors)
+  (let ((new-id (new-id-num)))
+    (with-connection
+	(let* ((sql (prepare *connection* "insert into arxiv_metadata
+                                             (id, arxiv_id, authors, authors_hash, submitted)
+                                           values (?, ?, ?, ?, ?)"))
+	       (arxiv-id #?"fake/$(new-id)")
+	       (id (md5sum arxiv-id))
+	       (authors-hash (calc-authors-hash authors))
+	       (authors (print-authors authors))
+	       (result (execute sql id arxiv-id authors authors-hash date)))
+	  result))
+    (list :fake new-id)))
 
 (defun permanent-id (str paper-submit id-fetcher)
   (if str
@@ -114,12 +140,70 @@ IAS preprint IASSNS-HEP-91/26 (June, 1991).
 
 (defun essential-cites-as-ids (fname)
   (let* ((cites (essential-cites (all-cites fname)))
+	 (submit (with-connection
+		     (id->submit-nmw (fname->id fname))))
 	 ;; (cites-lst (apply #'append (mapcar #'cdr cites)))
 	 (bibitems (to-bibitems (extract-bibliography (slurp-file fname))))
 	 (fetcher (mk-arxiv-id-fetcher)))
-    (iter (for (weight . names) in cites)
-	  (collect (cons weight (iter (for name in names)
-				      (collect (list name
+    (or (iter (for (weight . names) in cites)
+	      (collect (cons weight (mapcar (lambda (x)
+					      (list x (cite-name->id x submit bibitems fetcher)))
+					    names))))
+	;; KLUDGE to go through papers, which do not use "cite"
+	`((1 ("fake" "fake/-1"))))))
 
+(defun check-if-citations-processed (fname)
+  (let* ((id-hash (md5sum (fname->id fname)))
+	 (sql-str (format nil "select count(*) as count from weighted_cites where referring_paper = \"~a\""
+			  (cl-mysql:escape-string id-hash))))
+    (with-connection
+	(let ((result (execute (prepare *connection* sql-str))))
+	  (iter (for res next (let ((it (fetch result)))
+				(or it (terminate))))
+		(return (not (zerop (getf res :|count|)))))))))
+
+(defun calc-paper-hash (thing)
+  (md5sum (if (stringp thing)
+	      thing
+	      (cond ((eq :fake (car thing)) #?"fake/$((cadr thing))")
+		    ((eq :hep-th (car thing)) #?"hep-th/$((cadr thing))")
+		    ((eq :arxiv (car thing)) #?"$((cadr thing))")
+		    (t (error "Don't know how to calc hash of ~a" thing))))))
+
+(defun %essential-cites-to-sql (fname)
+  (let* ((id-hash (md5sum (fname->id fname)))
+	 (sql-str (with-output-to-string (stream)
+		   (format stream "insert into weighted_cites
+                                     (referring_paper, cited_paper, weight)
+                                   values ")
+		   (iter (for (weight . papers) in (essential-cites-as-ids fname))
+			 (iter (for paper in papers)
+			       (format stream "(\"~a\", \"~a\", \"~a\"),~%"
+				       (cl-mysql:escape-string id-hash)
+				       (cl-mysql:escape-string (calc-paper-hash (cadr paper)))
+				       (cl-mysql:escape-string (format nil "~a" weight))))))))
+    (format t "Sql str is: ~a~%" sql-str)
+    (with-connection
+	(execute (prepare *connection* (subseq sql-str 0 (- (length sql-str) 2)))))
+    :success!))
+
+(defun essential-cites-to-sql (fname)
+  (handler-case (%essential-cites-to-sql fname)
+    (error (e)
+      (with-connection
+	  (execute (prepare *connection*
+			    (format nil "delete from weighted_cites where referring_paper = \"~a\""
+				    (cl-mysql:escape-string (md5sum (fname->id fname)))))))
+      (error e))))
 
     
+(defun cites-to-sql-if-not-there (fname)
+  (if (not (check-if-citations-processed fname))
+      (essential-cites-to-sql fname)
+      (format t #?"Skipping $((pathname-name fname)) -- already processed~%")))
+
+
+(defun year-cites-to-sql (year)
+  (iter (for fname in-it (arxiv-id-fnames year))
+	(format t #?"Processing $((pathname-name fname))...~%")
+	(cites-to-sql-if-not-there fname)))

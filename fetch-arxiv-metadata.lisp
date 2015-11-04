@@ -85,13 +85,10 @@ values")
 
 ;; OK, let's assume this works
 (defun md5sum (str)
-  (coerce (mapcar #'code-char (coerce (digest-sequence :md5 (string-to-utf-8-bytes str))
-				      'list))
-		  
-	  'string))
-
-  ;; (format nil "~{~2,'0x~}" (coerce (digest-sequence :md5 (string-to-utf-8-bytes str))
-  ;; 				   'list)))
+  (format nil "~a"
+	  (iter (for num in-vector (digest-sequence :md5 (string-to-utf-8-bytes str)))
+		(for i from 0)
+		(summing (* num (expt 2 (* 8 i)))))))
 
 (defun string-truncate (str len)
   (if (< (length str) len)

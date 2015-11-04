@@ -20,15 +20,17 @@
 	  (format t "~{~a~^,~}~%" (mapcar #'cdr it)))))
 
 (defun essential-cites (cite-lst)
-  (let (prev-weight ratio)
+  (let (first-weight)
     (iter (for (weight group) in-it (igroupby cite-lst #'cdr))
-	  (setf ratio (float (if-first-time 1
-					    (* ratio (/ weight prev-weight))))
-		prev-weight weight)
+	  (if-first-time (setf first-weight weight)
+			 (if (< weight (/ first-weight 2.7))
+			     (terminate)))
 	  (let ((it (collect-iter (imap #'car group))))
-	    (collect (cons (/ ratio (length it))
-			   it))))))
-			 
+	    (collect (cons weight it) into res)
+	    (summing (* weight (length it)) into total))
+	  (finally (return (mapcar (lambda (x)
+				     (cons (float (/ (car x) total)) (cdr x)))
+				   res))))))
 
 
   
